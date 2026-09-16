@@ -1,9 +1,10 @@
 # Rust
 /target
 **/target
-# Node
+# Node (vite builds the client into hub/web-dist for rust-embed)
 node_modules
 dist
+web-dist
 # local
 .env
 .local/

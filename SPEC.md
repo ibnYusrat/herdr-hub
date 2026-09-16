@@ -77,8 +77,9 @@ updates. If any of these change, the hub design needs review.
 - Error: `{"id": "...", "error": {"code": "...", "message": "..."}}`
 - One request per connection. The server reads a single line, replies, and
   closes. Only `events.subscribe` and `pane.graphics.stream` keep the
-  connection open. The hub therefore needs a small connection pool, not one
-  persistent connection.
+  connection open. Connections are single-use, so the hub bounds concurrency
+  with a semaphore of "request lanes" (each request opens a fresh connection)
+  rather than a reusable connection pool.
 - The full JSON Schema for requests, responses, events, and subscription
   events is embedded in the binary and can be exported:
 
@@ -100,7 +101,17 @@ updates. If any of these change, the hub design needs review.
   `workspaces`, `tabs`, `panes`, `layouts` (BSP split trees per tab), and
   `agents`. Sidebar and layout can be built from this alone.
 - `events.subscribe` holds a connection open. First line acknowledges, later
-  lines are pushed events. Documented recipe to avoid a bootstrap gap:
+  lines are pushed events. Verified details (herdr 0.8.2 live, 0.9.0 source):
+  - **One subscription set per connection, fixed at subscribe time.** There is
+    no add/remove message; refreshing the set means opening a new
+    `events.subscribe` connection with the full desired set, then dropping the
+    old one (overlap is safe — events are applied with upsert semantics).
+  - **No replay before connect on 0.9.0.** The subscription starts at the
+    current sequence for each new subscriber (0.9.0 source), which is
+    exactly why the snapshot-plus-buffer recipe below is needed. This is
+    NOT true of 0.8.2, which replays retained history — see the replay
+    caveat below.
+  Documented recipe to avoid a bootstrap gap:
   1. Open `events.subscribe` and wait for its acknowledgement.
   2. Buffer incoming events.
   3. Call `session.snapshot` on another connection and install it.
@@ -117,6 +128,63 @@ updates. If any of these change, the hub design needs review.
 - `pane.agent_status_changed`, `pane.output_matched`, and `pane.scroll_changed`
   are evaluated by the server on a 100 ms tick, then pushed. Everything else
   is emitted at the moment it happens.
+- **These three tick-evaluated kinds are pane-scoped and REQUIRE a per-pane
+  `pane_id` filter** — a filterless subscribe for them is rejected. Each
+  per-pane subscription also costs the server a probe (`pane_get`) per tick,
+  so the hub subscribes `agent_status_changed` per pane for every known pane.
+  `scroll_changed` is NOT subscribed at all: nothing consumes it, and a
+  view-dependent subscription set would force a connection swap on every
+  client view change (see the replay caveat below). A dead
+  `pane_id` in the set fails the whole subscribe (error instead of ack), so
+  the hub recomputes from state and retries when panes churn.
+- Envelope duality (verified live): lifecycle events arrive as
+  `{"event":"<underscore_kind>","data":{"type":"<kind>",...,"<record>":{...}}}`
+  with the full record nested under a key (`workspace`, `tab`, `pane`,
+  `layout`); the three filtered pane kinds arrive with dotted event names
+  (`"pane.agent_status_changed"`) and flat `data` with no `type` echo. Parse
+  leniently and normalize dotted → underscore.
+- **History replay on subscribe (verified live on 0.8.2; fixed in 0.9.0
+  source):** every new `events.subscribe` connection walks the server's
+  retained event history from the beginning, delivering one matching event
+  per 100 ms poll tick. On a long-lived server this floods minutes of stale
+  events — the user's whole navigation history, phantom closes, focus
+  flapping — into hub state and every connected client, and any
+  subscription swap re-triggers it. 0.9.0 clamps each subscription to the
+  sequence at subscribe time. Events carry no sequence on the wire and the
+  protocol has no replay opt-out, so the hub gates by protocol version:
+  `protocol >= 22` streams subscriptions as designed; older servers run in
+  **poll mode** — no event subscriptions at all, with the snapshot
+  reconciler at a 2 s cadence as the change signal (tree, focus, agent
+  status; screens are unaffected — the hub's screen poller pushes those).
+  The web client derives agent-status transitions (notifications) from
+  snapshot diffs in poll mode.
+- **Event reliability caveat (verified live on 0.8.2 under heavy workspace
+  churn):** herdr can drop close events entirely and can emit lifecycle
+  events causally inverted (a `workspace_closed` for the previous instance
+  arrives before the next instance's `pane_created`, because workspace
+  numbers are reused immediately). Event-only state therefore drifts. The hub
+  bounds this with periodic snapshot reconciliation (default every 30 s):
+  fetch `session.snapshot` on a request lane, buffer-then-fold streaming
+  events across the fetch (the same pattern as the bootstrap), and install +
+  rebroadcast the snapshot whenever it differs. Related rules proven by the
+  same live testing: `pane_updated` must be update-only (never resurrect a
+  removed pane), and workspace/tab closures must cascade to their panes
+  locally — herdr emits no per-pane events for them.
+- **Phantom-pane flicker (verified live on 0.8.2):** `session.snapshot`
+  intermittently lists panes of already-closed workspaces while omitting the
+  workspace itself (observed as "0 workspaces, 1–3 orphan panes" — exactly
+  the ids of a just-closed workspace), and the event stream can emit a
+  matching `pane_created` for such an orphan. Installing one poisons every
+  per-pane subscription (`pane_not_found` → drop → phantom event re-adds it
+  → infinite subscribe churn). Guards on both hub and web client: a snapshot
+  installs only panes whose workspace AND tab are in the same snapshot, and
+  `pane_created` applies only when the parent workspace and tab already
+  exist (herdr emits real creates strictly workspace → tab → pane, so this
+  drops nothing legitimate).
+- **Revision quirk (verified live on 0.8.2):** `pane.read` can leave
+  `revision` at 0 across output. Screen change detection must therefore
+  treat text equality — not revision equality — as the final word: skip an
+  update only when BOTH revision and content are unchanged.
 - There is no push event for "pane screen content changed". An
   `pane.output_changed` event kind exists in the schema but is not in the
   documented subscribable list and no emission site was found. Do not rely on
@@ -134,6 +202,20 @@ updates. If any of these change, the hub design needs review.
 - `pane.wait_for_output` blocks until a substring or regex matches in the
   selected snapshot, with an optional timeout. It matches text that is
   already present. It is not a "wait for any change" primitive.
+- **Alternate-screen history capture SCROLLS the app (verified live on
+  0.8.2, source 0.9.0 `src/server/alt_screen_read.rs`):** a
+  `pane.read`/`agent.read` with `format: text`, `source: recent` or
+  `recent_unwrapped`, on a pane with a known agent, idle, on the
+  alternate screen, with mouse reporting enabled, and asking for more
+  lines than the viewport shows, does NOT just read — herdr sends mouse
+  wheel events INTO the pane to scroll the app up in batches, harvests
+  rows, then wheels back down to restore the viewport. While busy the
+  read instead fails with `agent_not_idle` ("use --source visible").
+  Polling such a read repeatedly (as a scrollback stream would) makes
+  the user's TUI visibly scroll up and down forever. Hub rule: the
+  scrollback poller reads agent panes via `source: visible` (window diff
+  semantics are identical client-side) and uses `recent` only for
+  non-agent panes, where real scrollback exists and the read is passive.
 - `pane.send_text` writes a string. `pane.send_keys` and `pane.send_input`
   accept herdr key-combo strings such as `enter`, `esc`, `up`, `ctrl+c`,
   `shift+tab`, `f1`.
@@ -172,6 +254,14 @@ updates. If any of these change, the hub design needs review.
   `src/main.rs` but are not in the CLI reference. Treat them as unsupported
   for outside use: they work today and could change without notice. Pin the
   herdr version tested against.
+- **Version caveat (verified live):** `remote-api-bridge` exists only in
+  herdr ≥ 0.9. On 0.8.2 the remote rejects it (`unknown command`). For older
+  remotes the hub's SSH transport has a second mode, `forward`: one
+  long-lived `ssh -N -L <local-unix-sock>:<remote-socket>` forwarder, with
+  every herdr connection multiplexed over it as a local `UnixStream::connect`.
+  Note sshd does not expand relative unix-socket paths, so the hub resolves
+  the remote `$HOME` once over SSH and forwards to an absolute path. This
+  works against any herdr version.
 - Alternative that uses only public surface: run one hub instance on every
   machine, next to its herdr server, and let the web client connect to each
   hub. Or run one hub and have it tunnel to the others over SSH using the
@@ -364,8 +454,11 @@ resubmitting. Never auto-retry a prompt.
 
 ## 9. Security
 
-- Hub binds to `127.0.0.1` by default. Remote access via SSH tunnel,
-  Tailscale, or similar until TLS and auth are hardened.
+- Hub binds to `0.0.0.0:8787` by default (LAN/phone clients out of the box;
+  override with `bind = "127.0.0.1:8787"` for loopback-only). Token auth and
+  the origin check are always on; on non-loopback binds without TLS the hub
+  logs a cleartext warning — use `tls_cert`/`tls_key` or a TLS reverse proxy
+  (or an SSH tunnel / Tailscale) beyond a trusted network.
 - WebSocket auth: a bearer token generated by the hub on first run and
   stored in its config. Pass it in the first `hello` message, not in the
   URL.
@@ -422,11 +515,15 @@ Verification for phase 0, run on a machine with a running herdr:
 herdr api schema --output herdr-api.schema.json
 herdr api snapshot | jq '.result | keys'
 printf '%s\n' '{"id":"1","method":"ping","params":{}}' | nc -U ~/.config/herdr/herdr.sock
-printf '%s\n' '{"id":"2","method":"events.subscribe","params":{"subscriptions":[{"type":"pane.agent_status_changed"}]}}' | nc -U ~/.config/herdr/herdr.sock
+printf '%s\n' '{"id":"2","method":"events.subscribe","params":{"subscriptions":[{"type":"workspace.created"},{"type":"pane.agent_status_changed","pane_id":"<a real pane id>"}]}}' | nc -U ~/.config/herdr/herdr.sock
 ```
 
-(Check the exact `events.subscribe` params shape in the exported schema; the
-line above is illustrative.)
+(`pane.agent_status_changed` and the other tick-evaluated kinds require a
+per-pane `pane_id` — see §3.4.) Implementation note: schemas for both
+protocol versions in use are pinned under `schemas/` in this repo; the
+running server at the time of writing is herdr 0.8.2 / protocol 20, and the
+pinned contract is 0.9.0 / protocol 22 (a strict method superset), with a
+protocol check and graceful degradation at connect.
 
 ---
 
@@ -458,6 +555,8 @@ advertises the method list and capabilities.
 
 - **Hidden bridge subcommands.** `remote-api-bridge` is undocumented. If it
   changes, multi-server over SSH falls back to running a hub per machine.
+  (Partially mitigated already: the hub's `forward` transport mode needs no
+  herdr-side support at all, only `ssh` and the remote socket — see §3.7.)
 - **API stability.** The schema carries `protocol` and `schema_version`.
   The hub should check both at connect and refuse or warn on mismatch.
   Record the tested herdr version in this repo.

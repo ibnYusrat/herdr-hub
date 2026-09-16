@@ -1,0 +1,701 @@
+/* Dark, TUI-flavored theme (SPEC §8). */
+
+:root {
+  --bg: #0b0e14;
+  --bg-panel: #10141c;
+  --bg-raised: #161b26;
+  --border: #232a38;
+  --fg: #c8ccd4;
+  --fg-dim: #6b7486;
+  --accent: #7aa2f7;
+  --st-idle: #6b7486;
+  --st-working: #e0af68;
+  --st-blocked: #f7768e;
+  --st-done: #9ece6a;
+  --st-unknown: #3b4254;
+  --ui-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --term-font: "JetBrains Mono Variable", "JetBrains Mono", "Fira Code",
+    ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+
+/* Chrome (sidebar, tabs, composer, overlays) uses the platform UI font;
+   monospace is scoped to actual terminal content below — the server grid
+   is authoritative, but the UI around it doesn't need to pretend to be a
+   TUI. */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 13px;
+}
+
+/* Container for the ~700px mobile layout (SPEC §8): the app may live in a
+   nested viewport, so query the shell's inline size, not the window. */
+.app-shell {
+  height: 100%;
+  container-type: inline-size;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* Token gate ------------------------------------------------------- */
+
+.token-gate {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.token-gate h1 { margin: 0; color: var(--accent); }
+.token-gate pre {
+  font-family: var(--term-font);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+.token-gate form { display: flex; gap: 8px; }
+.token-gate input {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 6px 10px;
+  width: 340px;
+  font: inherit;
+}
+.token-gate button {
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-weight: 600;
+}
+
+/* App layout ------------------------------------------------------- */
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+}
+
+.banner {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--st-blocked);
+  color: var(--bg);
+  padding: 2px 14px;
+  border-radius: 0 0 6px 6px;
+  z-index: 10;
+  font-weight: 600;
+}
+
+/* Sidebar ----------------------------------------------------------- */
+
+.sidebar {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.server-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.server-head.active { color: var(--accent); }
+.server-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Row-attached action buttons (＋ ✎ × …): dim until the row is hovered. */
+.head-actions,
+.ws-actions,
+.tab-actions {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.server-head:hover .head-actions,
+.ws-row:hover .ws-actions,
+.tab-wrap.active:hover .tab-actions,
+.tab-wrap.active:focus-within .tab-actions { opacity: 1; }
+.head-actions { margin-left: auto; }
+.head-actions button,
+.ws-actions button,
+.tab-actions button {
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.head-actions button:hover,
+.ws-actions button:hover,
+.tab-actions button:hover { background: var(--bg-raised); color: var(--fg); }
+
+.server-body { padding-bottom: 4px; }
+.server-body.dim { opacity: 0.45; }
+
+.workspace { margin: 2px 0 6px; }
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.ws-row:hover { background: var(--bg-raised); }
+.ws-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.badge {
+  color: var(--fg-dim);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-actions { margin-left: auto; }
+.ws-row:hover .badge { display: none; } /* avoid crowding while actions show */
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 12px 2px 24px;
+  color: var(--fg-dim);
+}
+.agent-row:hover { background: var(--bg-raised); color: var(--fg); }
+.agent-name { color: inherit; }
+.agent-cwd {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.7;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty { padding: 4px 12px; color: var(--fg-dim); font-style: italic; }
+
+/* Main / tabs / panes ------------------------------------------------- */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tabbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid transparent;
+  color: var(--fg-dim);
+}
+.tab.active { background: var(--bg); color: var(--fg); border-color: var(--border); }
+.tabbar.dim .tab { opacity: 0.45; }
+
+.tab-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.new-tab {
+  color: var(--fg-dim);
+  padding: 4px 10px;
+  border-radius: 6px 6px 0 0;
+}
+.new-tab:hover { background: var(--bg-raised); color: var(--fg); }
+
+.screen-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  overflow: hidden;
+  /* Size container so the grid can fit-to-area with cqw/cqh (below). */
+  container-type: size;
+}
+
+.pane-grid {
+  position: relative;
+  /* Fit the server grid inside the screen area, preserving its cell
+     aspect ratio: as wide as possible, but never taller than the area.
+     (A bare aspect-ratio collapses here — the grid's children are all
+     absolutely positioned, so it has no intrinsic content size.) */
+  width: min(100cqw, calc(100cqh * var(--grid-ratio, 4 / 3)));
+  aspect-ratio: var(--grid-ratio, 4 / 3);
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.pane-grid.dim { opacity: 0.45; transition: opacity 300ms; }
+
+.pane {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid transparent;
+}
+.pane.focused { border-color: var(--accent); }
+
+.split {
+  position: absolute;
+  background: var(--border);
+}
+
+.term-host {
+  position: absolute;
+  inset: 2px;
+  overflow: hidden;
+}
+
+.empty-screen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+}
+
+/* Status colors ------------------------------------------------------ */
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--st-unknown);
+}
+.dot.st-idle { background: var(--st-idle); }
+.dot.st-working { background: var(--st-working); animation: pulse 1.6s infinite; }
+.dot.st-blocked { background: var(--st-blocked); }
+.dot.st-done { background: var(--st-done); }
+.dot.st-connecting,
+.dot.st-reconnecting { background: var(--st-working); animation: pulse 0.8s infinite; }
+.dot.st-offline { background: var(--st-unknown); }
+
+.status-icon.st-idle { color: var(--st-idle); }
+.status-icon.st-working { color: var(--st-working); }
+.status-icon.st-blocked { color: var(--st-blocked); }
+.status-icon.st-done { color: var(--st-done); }
+
+.pane.st-blocked { box-shadow: inset 0 0 0 1px var(--st-blocked); }
+
+@keyframes pulse {
+  50% { opacity: 0.35; }
+}
+
+/* Banner variants ----------------------------------------------------- */
+
+.banner.warn {
+  cursor: pointer;
+  background: var(--bg-raised);
+  color: var(--st-blocked);
+  border: 1px solid var(--st-blocked);
+}
+.banner-dismiss { color: var(--fg-dim); font-weight: 400; }
+
+/* Control toolbar ----------------------------------------------------- */
+
+.control-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.control-toolbar button {
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: var(--fg-dim);
+  border: 1px solid transparent;
+}
+.control-toolbar button:hover {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+.control-toolbar.blocked {
+  box-shadow: inset 0 0 0 1px var(--st-blocked);
+}
+.control-toolbar.blocked button { color: var(--fg); }
+
+.toolbar-digits { display: inline-flex; gap: 1px; }
+.toolbar-digits button { min-width: 22px; text-align: center; padding: 2px 3px; }
+.toolbar-gap { flex: 1; }
+
+.raw-on {
+  color: var(--st-working) !important;
+  border-color: var(--st-working) !important;
+  font-weight: 600;
+}
+.notif-on { color: var(--st-done) !important; }
+.danger { color: var(--st-blocked) !important; }
+
+/* Composer ------------------------------------------------------------ */
+
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+.composer-agent {
+  color: var(--accent);
+  flex: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Agent permission mode, parsed from the console footer (footer.ts) —
+   colored like the TUI: amber auto, rose bypass, blue plan. */
+.composer-mode {
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+.composer-mode.mode-auto { color: var(--st-working); border-color: var(--st-working); }
+.composer-mode.mode-bypass { color: var(--st-blocked); border-color: var(--st-blocked); }
+.composer-mode.mode-plan { color: var(--accent); border-color: var(--accent); }
+.composer input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 5px 10px;
+  font: inherit;
+}
+.composer input:focus { outline: none; border-color: var(--accent); }
+.composer input:disabled { opacity: 0.5; }
+.composer button {
+  flex: none;
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-weight: 600;
+}
+.composer button:disabled { opacity: 0.4; }
+.composer.blocked .composer-agent { color: var(--st-blocked); }
+.composer.blocked input { border-color: var(--st-blocked); }
+
+.raw-badge {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  z-index: 5;
+  background: var(--st-working);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* Overlays ------------------------------------------------------------ */
+
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 14, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.overlay {
+  min-width: 320px;
+  max-width: 440px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.overlay h3 { margin: 0 0 10px; color: var(--accent); font-size: 13px; }
+.overlay p { margin: 0 0 12px; color: var(--fg-dim); }
+.overlay input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 5px 10px;
+  font: inherit;
+  margin-bottom: 8px;
+}
+.overlay input:focus { outline: none; border-color: var(--accent); }
+.overlay-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.overlay-actions button {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+.overlay-actions button:hover { background: var(--bg-raised); }
+.overlay-actions button[type="submit"] { border-color: var(--accent); color: var(--accent); }
+.overlay-actions button.danger { border-color: var(--st-blocked); color: var(--st-blocked); }
+.overlay-actions button:disabled { opacity: 0.4; }
+
+/* Transcript view ----------------------------------------------------- */
+
+/* Full-area append-only log of the focused pane (vs the mirrored grid). */
+.transcript-wrap {
+  position: absolute;
+  inset: 10px;
+  overflow: hidden;
+}
+.transcript-wrap.dim { opacity: 0.45; transition: opacity 300ms; }
+
+.transcript {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 12px;
+  font-family: var(--term-font);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--fg);
+  user-select: text;
+  cursor: text;
+}
+.transcript.selectable ::selection,
+.transcript.selectable::selection { background: rgba(122, 162, 247, 0.35); }
+
+.transcript-note {
+  color: var(--fg-dim);
+  font-style: italic;
+  margin-bottom: 6px;
+}
+
+.transcript-jump {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+  padding: 3px 12px;
+  font-size: 12px;
+}
+.transcript-jump:hover { border-color: var(--accent); color: var(--accent); }
+
+.txt-on {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+
+/* Scrollback overlay -------------------------------------------------- */
+
+.scrollback-overlay {
+  position: absolute;
+  inset: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: rgba(11, 14, 20, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.scrollback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.scrollback-head button { color: var(--fg-dim); }
+.scrollback-head button:hover { color: var(--fg); }
+.scrollback-body {
+  flex: 1;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--term-font);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg);
+  user-select: text;
+  cursor: text;
+}
+.scrollback-body.selectable ::selection,
+.scrollback-body.selectable::selection { background: rgba(122, 162, 247, 0.35); }
+
+/* Mobile layout (~700px and below) ------------------------------------ */
+
+.mobile-bar {
+  display: none; /* desktop: nothing */
+}
+
+@container (max-width: 700px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  /* Top bar with the drawer toggle replaces the static sidebar. */
+  .mobile-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    grid-column: 1;
+  }
+  .mobile-bar button {
+    font-size: 16px;
+    padding: 2px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--fg);
+  }
+  .mobile-bar .mobile-title {
+    color: var(--fg-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Sidebar becomes an off-canvas drawer. */
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(78vw, 300px);
+    z-index: 40;
+    transform: translateX(-102%);
+    transition: transform 200ms ease;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.45);
+  }
+  .app.drawer-open .sidebar { transform: none; }
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgba(5, 8, 14, 0.6);
+  }
+
+  /* Tabs become compact chips. */
+  .tab, .new-tab {
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .tab.active { border-radius: 999px; }
+
+  /* Panes become a horizontal scroll-snap carousel; the server grid stays
+     authoritative — each pane is a full-width slide. Inline %-positioning
+     from the desktop layout is overridden with !important. */
+  .screen-area {
+    padding: 0;
+    align-items: stretch;
+  }
+  .pane-grid {
+    aspect-ratio: auto !important;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    border-left: none;
+    border-right: none;
+  }
+  .pane {
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 100%;
+    flex: none;
+    scroll-snap-align: center;
+  }
+  .split { display: none; }
+
+  /* Composer stays reachable above the fold. */
+  .composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+  }
+  .control-toolbar { overflow-x: auto; }
+  .raw-badge { top: 8px; right: 8px; }
+}

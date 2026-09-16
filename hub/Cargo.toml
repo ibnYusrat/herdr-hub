@@ -1,0 +1,40 @@
+[package]
+name = "herdr-hub"
+version = "0.1.0"
+edition = "2021"
+description = "Gateway that exposes running herdr servers to web and mobile clients over one push-based WebSocket protocol"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs"] }
+hyper = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.9"
+toml = "0.9"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+arc-swap = "1"
+async-trait = "0.1"
+indexmap = { version = "2", features = ["serde"] }
+rust-embed = "8"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+
+[dev-dependencies]
+tokio-tungstenite = "0.27"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = "thin"
