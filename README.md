@@ -11,6 +11,9 @@ tabs, panes, and worktrees).
 The web client is embedded in the hub binary: run the hub, open the page,
 paste the token. Nothing else to deploy.
 
+![herdr-hub web client: sidebar with servers, workspaces, and agents; live
+terminal transcript with ANSI colors; composer at the bottom](docs/screenshot.png)
+
 ```
 browser -- WebSocket (hub protocol v1) -- herdr-hub -- Unix socket -- herdr (local)
                                             \-- SSH (bridge or forward) -- herdr (remote)
